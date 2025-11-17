@@ -18,7 +18,7 @@ void derive_keys(const uint_fast8_t key_generating_key[32],
 	uint_fast8_t block[16], out[16];	
 	AES_KEY aes_key;
 	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
-	for (counter = 0; counter <= 1; counter++) {
+	for (counter = 0; counter <= 5; counter++) {
 		memset(block, 0, 16);
 		//this will break on BE system (but who uses them anyways)
 		*(uint_fast32_t*)block = counter;
@@ -26,23 +26,18 @@ void derive_keys(const uint_fast8_t key_generating_key[32],
 		memcpy(block + 4, nonce, 12);
 		AES_encrypt(block, out, &aes_key);
 
-		for (i = 0; i < 8; i++) {
-			ptr->message_auth_key[counter * 8 + i] = out[i];
-		}
-	}
-	for (;counter <= 5; counter++) {
-		memset(block, 0, 16);
-		*(uint32_t*)block = counter;
-
-		memcpy(block + 4, nonce, 12);
-		AES_encrypt(block, out, &aes_key);
-
-		for (i = 0; i < 8; i++) {
-			ptr->message_encryption_key[counter * 8 + i] = out[i];
+		if (counter <= 1) {
+			for (i = 0; i < 8; i++) {
+				ptr->message_auth_key[counter * 8 + i] = out[i];
+			}
+		} else {
+			for (i = 0; i < 8; i++) {
+				ptr->message_encryption_key[counter * 8 + i] = out[i];
+			}
 		}
 	}
 }
-// openssl already provides AES_CTF (but its absolute dogshit, so i am gonna create my own)
+// openssl already provides AES_CTR (but its absolute dogshit, so i am gonna create my own)
 
 void AES_CTR(uint_fast8_t *out, const uint_fast8_t *in, const uint_fast8_t key[32],
 	uint_fast8_t counter_block[16])
