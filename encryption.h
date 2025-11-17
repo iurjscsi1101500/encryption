@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 #include <openssl/aes.h>
 
 struct group {
@@ -14,7 +15,7 @@ static inline void derive_keys(const AES_KEY aes_key,
 		const uint_fast8_t nonce[12],
 		struct group *ptr)
 {
-	uint_fast8_t block[16], out[16];	
+	uint_fast8_t block[16] = {0}, out[16];
 	memcpy(block + 4, nonce, 12);
 
 	*(uint_fast32_t*)block = 0;
@@ -48,7 +49,7 @@ static inline void AES_CTR(const AES_KEY aes_key, const uint_fast8_t tag[16], co
 	memcpy(counter_block, tag, 16);
 	counter_block[15] |= 0x80;
 
-	uint_fast32_t *counter = (uint_fast32_t*)counter_block;
+	uint_fast32_t *counter = (uint_fast32_t*)&counter_block[12];
 	size_t i;
 	uint_fast8_t keystream[16];
 
@@ -71,43 +72,75 @@ static inline void AES_CTR(const AES_KEY aes_key, const uint_fast8_t tag[16], co
 	}
 }
 
-static inline void POLYVAL(uint_fast8_t S[16], const uint_fast8_t H[16], const uint_fast8_t *input, size_t len) {
-	uint_fast8_t X[16];
+static inline void POLYVAL(uint_fast8_t S[16], const uint_fast8_t H[16],
+						   const uint_fast8_t *input, size_t len)
+{
 	uint_fast64_t h0, h1;
-	uint_fast64_t a0, a1;
+	uint_fast64_t s0, s1;
 	uint_fast64_t r0, r1;
-	size_t i, block_len;
-
-	memset(S, 0, 16);
+	uint_fast64_t carry;
+	uint_fast64_t bit;
+	uint_fast8_t block[16];
+	size_t n;
+	int i;
 
 	h0 = ((uint_fast64_t*)H)[0];
 	h1 = ((uint_fast64_t*)H)[1];
 
-	for (i = 0; i < len; i += 16) {
-		memset(X, 0, 16);
-		block_len = (len - i >= 16) ? 16 : len - i;
-		memcpy(X, input + i, block_len);
+	s0 = 0;
+	s1 = 0;
 
-		a0 = ((uint_fast64_t*)S)[0] ^ ((uint_fast64_t*)X)[0];
-		a1 = ((uint_fast64_t*)S)[1] ^ ((uint_fast64_t*)X)[1];
+	r0 = 0;
+	r1 = 0;
+
+	while (len > 0) {
+
+		memset(block, 0, 16);
+		n = (len >= 16 ? 16 : len);
+		memcpy(block, input, n);
+
+		input += n;
+		len -= n;
+
+		s0 ^= ((uint_fast64_t*)block)[0];
+		s1 ^= ((uint_fast64_t*)block)[1];
 
 		r0 = 0;
 		r1 = 0;
-		for (int b = 0; b < 64; b++) {
-			if (h1 & ((uint_fast64_t)1ULL << b)) { r0 ^= a1 >> (63-b); r1 ^= a1 << b; }
-			if (h0 & ((uint_fast64_t)1ULL << b)) { r0 ^= a0 >> (63-b); r1 ^= a0 << b; }
+
+		for (i = 0; i < 128; i++) {
+
+			bit = (i < 64)
+				? ((s1 >> (63 - i)) & 1)
+				: ((s0 >> (127 - i)) & 1);
+
+			if (bit) {
+				r0 ^= h0;
+				r1 ^= h1;
+			}
+
+			carry = h1 & 1;
+			h1 = (h1 >> 1) | (h0 << 63);
+			h0 >>= 1;
+
+			if (carry)
+				h0 ^= 0x1c20000000000000ULL;   // POLYVAL reduction polynomial
 		}
 
-		((uint_fast64_t*)S)[0] = r0 ^ 0x0101000000000000ULL;
-		((uint_fast64_t*)S)[1] = r1 ^ 0xC200000000000000ULL;
+		s0 = r0;
+		s1 = r1;
 	}
+
+	((uint_fast64_t*)S)[0] = s0;
+	((uint_fast64_t*)S)[1] = s1;
 }
 
 static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const uint_fast8_t nonce[12],
-	const size_t nonce_size, const uint_fast8_t *input, const size_t input_size,
-	const uint_fast8_t *add_data, const size_t add_data_size, uint_fast8_t *output)
+	const uint_fast8_t *input, const size_t input_size,
+	const uint_fast8_t *add_data, const size_t add_data_size,
+	uint_fast8_t *output, size_t *output_size)
 {
-	if (sizeof(input) > 0x1000000000 || sizeof(add_data) > 0x1000000000 || sizeof(input) <= 0 || sizeof(add_data) <= 0)
+	if (input_size > 0x1000000000 || add_data_size > 0x1000000000 || input_size <= 0 || add_data_size <= 0)
 		return -1;
 
 	AES_KEY aes_key;
@@ -132,9 +165,30 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	tag[15] &= 0x7F;
 	AES_encrypt(tag, tag, &aes_key);
 
-	// There is ++ tag on the doc for AES-256-GCM-SIV but i think its a typo
 	AES_CTR(aes_key, tag, input, input_size, output);
+	memcpy(output + input_size, tag, 16);
+
+	*output_size = input_size + 16;
 	free(buffer);
+	return 0;
+}
+static inline int decrypt_sym(const uint_fast8_t key_generating_key[32], const uint_fast8_t nonce[12],
+	const uint_fast8_t *input, const size_t input_size,
+	const uint_fast8_t *add_data, const size_t add_data_size,
+	uint_fast8_t *output)
+{
+	if (input_size > 0x100000000F || add_data_size > 0x1000000000 || input_size < 16 || add_data_size <= 0)
+		return -1;
+
+	AES_KEY aes_key;
+	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
+	struct group keys;
+	uint_fast8_t tag[16] = {0};
+
+	derive_keys(aes_key, nonce, &keys);
+	memcpy(tag, input + (input_size - 16), 16);
+
+	AES_CTR(aes_key, tag, input, input_size - 16, output);
 	return 0;
 }
 #endif
