@@ -14,7 +14,7 @@ void derive_keys(const uint_fast8_t key_generating_key[32],
 		const uint_fast8_t nonce[12],
 		struct group *ptr)
 {
-	uint_fast32_t counter, i;
+	uint_fast32_t counter, i, counter_2;
 	uint_fast8_t block[16], out[16];	
 	AES_KEY aes_key;
 	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
@@ -32,8 +32,9 @@ void derive_keys(const uint_fast8_t key_generating_key[32],
 			}
 		} else {
 			for (i = 0; i < 8; i++) {
-				ptr->message_encryption_key[counter * 8 + i] = out[i];
+				ptr->message_encryption_key[counter_2 * 8 + i] = out[i];
 			}
+			counter_2++;
 		}
 	}
 }
