@@ -47,30 +47,48 @@ void derive_keys(const uint_fast8_t key_generating_key[32],
 	memcpy(ptr->message_encryption_key + 24, out, 8);
 }
 // openssl already provides AES_CTR (but its absolute dogshit, so i am gonna create my own)
-
-void AES_CTR(uint_fast8_t *out, uint_fast8_t *in, const size_t len, const uint_fast8_t key[32],
-	const uint_fast8_t init_counter_block[16])
+void aes_ctr(const uint_fast8_t key[32], const uint_fast8_t tag[16], const uint_fast8_t *input, size_t input_sz, uint_fast8_t *output)
 {
 	AES_KEY aes_key;
-	uint_fast8_t block[16];
-	uint_fast8_t keystream_block[16];
-	uint_fast32_t ok;
-	size_t i, out_len = 0, local_len = len;
-	uint_fast8_t *local_in = in;
+	AES_set_encrypt_key(key, 256, &aes_key);
 
-	memcpy(block, init_counter_block, 16);
-	AES_set_encrypt_key(key, 256, &aes_key);	
-	while(local_len > 0) {
-		AES_encrypt(block, keystream_block, &aes_key);
-		*(uint_fast32_t *)block += 1;
-		ok = MIN(local_len, sizeof(keystream_block));
+	uint_fast8_t counter_block[16];
+	memcpy(counter_block, tag, 16);
+	counter_block[15] |= 0x80;
 
-		for (i = 0; i < ok; i++)
-			out[out_len++] = keystream_block[i] ^ local_in[i];
+	uint_fast32_t *counter = (uint_fast32_t*)counter_block;
+	size_t i;
+	uint_fast8_t keystream[16];
 
-		local_in += ok;
-		local_len -= ok;
+	while (input_sz >= 16) {
+		AES_encrypt(counter_block, keystream, &aes_key);
+		(*counter)++;
+		for (i = 0; i < 16; i++)
+			output[i] = input[i] ^ keystream[i];
+
+		input += 16;
+		output += 16;
+		input_sz -= 16;
 	}
 
+	if (input_sz > 0) {
+		AES_encrypt(counter_block, keystream, &aes_key);
+		(*counter)++;
+		for (i = 0; i < input_sz; i++)
+			output[i] = input[i] ^ keystream[i];
+	}
+}
+
+int encrypt_sym(const uint_fast8_t key_generating_key[32], const uint_fast8_t nonce[12],
+	const size_t nonce_size, const uint_fast8_t *input, const size_t input_size,
+	const uint_fast8_t *add_data, uint_fast8_t output)
+{
+	if (sizeof(input) > 0x1000000000 || sizeof(add_data) > 0x1000000000 || sizeof(input) <= 0 || sizeof(add_data) <= 0)
+		return -1;
+
+	struct group keys;
+	derive_keys(key_generating_key, nonce, &keys);
+
+	return 0;
 }
 #endif
