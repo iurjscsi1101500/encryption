@@ -183,12 +183,36 @@ static inline int decrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	AES_KEY aes_key;
 	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
 	struct group keys;
-	uint_fast8_t tag[16] = {0};
+	uint_fast8_t tag[16] = {0}, length_block[16] = {0}, expected_tag[16] = {0}, i;
 
 	derive_keys(aes_key, nonce, &keys);
 	memcpy(tag, input + (input_size - 16), 16);
 
 	AES_CTR(aes_key, tag, input, input_size - 16, output);
-	return 0;
+
+	uint_fast8_t *buffer = calloc((input_size - 16) + add_data_size + 16, sizeof(uint_fast8_t));
+	if (!buffer) return -2;
+
+	*(uint_fast64_t *)length_block = (uint_fast64_t)(add_data_size * 8);
+	*(uint_fast64_t *)(length_block + 8) = (uint_fast64_t)((input_size - 16) * 8);
+	//Again leave the padding to other functions
+
+	memcpy(buffer, add_data, add_data_size);
+	memcpy(buffer + add_data_size, output, input_size - 16);
+	memcpy(buffer + add_data_size + (input_size - 16), length_block, 16);
+	POLYVAL(expected_tag, keys.message_auth_key, buffer, add_data_size + (input_size - 16) + 16);
+
+	for (i = 0; i < 12; i++)
+		expected_tag[i] ^= nonce[i];
+
+	expected_tag[15] &= 0x7F;
+	AES_encrypt(expected_tag, expected_tag, &aes_key);
+
+	uint_fast8_t xor_sum = 0;
+	for (i = 0; i < sizeof(expected_tag); i++)
+		xor_sum |= expected_tag[i] ^ tag[i];
+
+	free(buffer);
+	return xor_sum;
 }
 #endif
