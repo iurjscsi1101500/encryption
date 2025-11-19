@@ -164,11 +164,11 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	for (i = 0; i < 16; i++) printf("%02x", keys.message_auth_key[i]);
 	printf("\n");
 
-	printf("Record encryption key =	 ");
+	printf("Record encryption key =	");
 	for (i = 0; i < 32; i++) printf("%02x", keys.message_encryption_key[i]);
 	printf("\n");
 
-	printf("POLYVAL input =			 ");
+	printf("POLYVAL input =	");
 	for (i = 0; i < add_data_size + input_size + 16; i++) {
 		printf("%02x", buffer[i]);
 		if ((i + 1) % 16 == 0 && (i + 1) < add_data_size + input_size + 16)
@@ -178,26 +178,26 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 
 	POLYVAL(tag, keys.message_auth_key, buffer, add_data_size + input_size + 16);
 
-	printf("POLYVAL result =			");
+	printf("POLYVAL result = ");
 	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
 	printf("\n");
 
 	for (i = 0; i < 12; i++)
 		tag[i] ^= nonce[i];
 
-	printf("POLYVAL result XOR nonce =  ");
+	printf("POLYVAL result XOR nonce = ");
 	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
 	printf("\n");
 
 	tag[15] &= 0x7F;
 
-	printf("... and masked =			");
+	printf("... and masked = ");
 	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
 	printf("\n");
 
 	AES_encrypt(tag, tag, &aes_key);
 
-	printf("Tag =					   ");
+	printf("Tag = ");
 	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
 	printf("\n");
 
