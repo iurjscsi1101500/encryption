@@ -143,7 +143,7 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	if (input_size > 0x1000000000 || add_data_size > 0x1000000000)
 		return -1;
 
-	AES_KEY aes_key;
+	AES_KEY aes_key, aes_enc_key;
 	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
 
 	struct group keys;
@@ -152,6 +152,7 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	if (!buffer) return -2;
 
 	derive_keys(aes_key, nonce, &keys);
+	AES_set_encrypt_key(keys.message_encryption_key, 256, &aes_enc_key);
 
 	*(uint_fast64_t *)length_block = (uint_fast64_t)(add_data_size * 8);
 	*(uint_fast64_t *)(length_block + 8) = (uint_fast64_t)(input_size * 8);
@@ -169,11 +170,8 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	printf("\n");
 
 	printf("POLYVAL input =	");
-	for (i = 0; i < add_data_size + input_size + 16; i++) {
+	for (i = 0; i < add_data_size + input_size + 16; i++)
 		printf("%02x", buffer[i]);
-		if ((i + 1) % 16 == 0 && (i + 1) < add_data_size + input_size + 16)
-			printf("\n							 ");
-	}
 	printf("\n");
 
 	POLYVAL(tag, keys.message_auth_key, buffer, add_data_size + input_size + 16);
@@ -195,7 +193,7 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
 	printf("\n");
 
-	AES_encrypt(tag, tag, &aes_key);
+	AES_encrypt(tag, tag, &aes_enc_key);
 
 	printf("Tag = ");
 	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
@@ -216,12 +214,14 @@ static inline int decrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	if (input_size > 0x100000000F || add_data_size > 0x1000000000 || input_size < 16 || add_data_size <= 0)
 		return -1;
 
-	AES_KEY aes_key;
+	AES_KEY aes_key, aes_enc_key;
 	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
 	struct group keys;
 	uint_fast8_t tag[16] = {0}, length_block[16] = {0}, expected_tag[16] = {0}, i;
 
 	derive_keys(aes_key, nonce, &keys);
+	AES_set_encrypt_key(keys.message_encryption_key, 256, &aes_enc_key);
+
 	memcpy(tag, input + (input_size - 16), 16);
 
 	AES_CTR(aes_key, tag, input, input_size - 16, output);
@@ -242,7 +242,7 @@ static inline int decrypt_sym(const uint_fast8_t key_generating_key[32], const u
 		expected_tag[i] ^= nonce[i];
 
 	expected_tag[15] &= 0x7F;
-	AES_encrypt(expected_tag, expected_tag, &aes_key);
+	AES_encrypt(expected_tag, expected_tag, &aes_enc_key);
 
 	uint_fast8_t xor_sum = 0;
 	for (i = 0; i < sizeof(expected_tag); i++)
