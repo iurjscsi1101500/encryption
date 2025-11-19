@@ -140,30 +140,66 @@ static inline int encrypt_sym(const uint_fast8_t key_generating_key[32], const u
 	const uint_fast8_t *add_data, const size_t add_data_size,
 	uint_fast8_t *output, size_t *output_size)
 {
-	if (input_size > 0x1000000000 || add_data_size > 0x1000000000 || input_size <= 0 || add_data_size <= 0)
+	if (input_size > 0x1000000000 || add_data_size > 0x1000000000)
 		return -1;
 
 	AES_KEY aes_key;
 	AES_set_encrypt_key(key_generating_key, 256, &aes_key);
+
 	struct group keys;
 	uint_fast8_t length_block[16] = {0}, tag[16] = {0}, i;
 	uint_fast8_t *buffer = calloc(input_size + add_data_size + 16, sizeof(uint_fast8_t));
 	if (!buffer) return -2;
 
 	derive_keys(aes_key, nonce, &keys);
+
 	*(uint_fast64_t *)length_block = (uint_fast64_t)(add_data_size * 8);
 	*(uint_fast64_t *)(length_block + 8) = (uint_fast64_t)(input_size * 8);
-	//Leave the padding to other functions
+
 	memcpy(buffer, add_data, add_data_size);
 	memcpy(buffer + add_data_size, input, input_size);
 	memcpy(buffer + add_data_size + input_size, length_block, 16);
+
+	printf("Record authentication key = ");
+	for (i = 0; i < 16; i++) printf("%02x", keys.message_auth_key[i]);
+	printf("\n");
+
+	printf("Record encryption key =	 ");
+	for (i = 0; i < 32; i++) printf("%02x", keys.message_encryption_key[i]);
+	printf("\n");
+
+	printf("POLYVAL input =			 ");
+	for (i = 0; i < add_data_size + input_size + 16; i++) {
+		printf("%02x", buffer[i]);
+		if ((i + 1) % 16 == 0 && (i + 1) < add_data_size + input_size + 16)
+			printf("\n							 ");
+	}
+	printf("\n");
+
 	POLYVAL(tag, keys.message_auth_key, buffer, add_data_size + input_size + 16);
+
+	printf("POLYVAL result =			");
+	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
+	printf("\n");
 
 	for (i = 0; i < 12; i++)
 		tag[i] ^= nonce[i];
 
+	printf("POLYVAL result XOR nonce =  ");
+	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
+	printf("\n");
+
 	tag[15] &= 0x7F;
+
+	printf("... and masked =			");
+	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
+	printf("\n");
+
 	AES_encrypt(tag, tag, &aes_key);
+
+	printf("Tag =					   ");
+	for (i = 0; i < 16; i++) printf("%02x", tag[i]);
+	printf("\n");
 
 	AES_CTR(aes_key, tag, input, input_size, output);
 	memcpy(output + input_size, tag, 16);
